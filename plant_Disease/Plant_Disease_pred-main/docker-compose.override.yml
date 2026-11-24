@@ -1,0 +1,19 @@
+# Local development overrides — auto-loaded by docker-compose
+# Mounts source code so you don't need to rebuild on every change
+
+version: "3.9"
+
+services:
+  python_api:
+    volumes:
+      - ./backend/llm-models/app.py:/app/app.py
+      - ./backend/llm-models/chatbot.py:/app/chatbot.py
+      - ./backend/llm-models/langgraph_explain.py:/app/langgraph_explain.py
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+
+  node_api:
+    volumes:
+      - ./backend/server.js:/app/server.js
+      - ./backend/routes:/app/routes
+      - ./backend/models:/app/models
+    command: node server.js

@@ -1,0 +1,88 @@
+version: "3.9"
+
+services:
+
+  # ── MongoDB ───────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: plant_mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Python FastAPI ────────────────────────────────────────────────────────────
+  python_api:
+    build:
+      context: ./backend/llm-models
+      dockerfile: Dockerfile
+    container_name: plant_python
+    restart: unless-stopped
+    env_file:
+      - ./backend/llm-models/.env
+    environment:
+      # Override to use Docker service names
+      - MONGO_URI=mongodb://mongo:27017/plant_disease
+      # Point to clean-name copies created by docker-setup.sh
+      - WEIGHTS_PATH=/app/weights.h5
+      - CSV_PATH=/app/class_dict.csv
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./backend/llm-models/weights.h5:/app/weights.h5:ro
+      - ./backend/llm-models/class_dict.csv:/app/class_dict.csv:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ── Node.js API Gateway ───────────────────────────────────────────────────────
+  node_api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: plant_node
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/plant_disease
+      - PYTHON_API_URL=http://python_api:8000
+      - CORS_ORIGINS=http://localhost,http://localhost:80
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      python_api:
+        condition: service_healthy
+
+  # ── Flutter Web Frontend ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Flutter is compiled to JS — backend URL is resolved in the browser,
+        # so it must be the host-accessible address, not a Docker service name.
+        - BACKEND_URL=http://localhost:3000/api
+    container_name: plant_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - node_api
+
+volumes:
+  mongo_data:
